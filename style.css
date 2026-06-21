@@ -686,3 +686,14 @@ button:disabled {
     padding: 16px;
   }
 }
+
+button.inventory-item {
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+button.inventory-item:hover {
+  background: #fff9eb;
+  border-color: rgba(224, 93, 55, 0.42);
+}

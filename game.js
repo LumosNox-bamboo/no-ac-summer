@@ -439,7 +439,7 @@ function renderInventory() {
   return `
     <section class="panel">
       <h2>道具</h2>
-      ${entries.length ? `<div class="inventory-grid">${entries.map(([id, count]) => `<div class="inventory-item">${GAME_CONFIG.inventoryLabels[id]} × ${count}</div>`).join("")}</div>` : `<p class="empty-inventory">你目前只有热空气。</p>`}
+      ${entries.length ? `<div class="inventory-grid">${entries.map(([id, count]) => `<button class="inventory-item" type="button" onclick="openItemModal('${id}')">${GAME_CONFIG.inventoryLabels[id]} × ${count}</button>`).join("")}</div>` : `<p class="empty-inventory">你目前只有热空气。</p>`}
     </section>
   `;
 }
@@ -516,6 +516,47 @@ function openFurnitureModal(furnitureId) {
   document.getElementById("modal").setAttribute("aria-hidden", "false");
 }
 
+function openItemModal(itemId) {
+  if (!state || state.gameOver) return;
+  const label = GAME_CONFIG.inventoryLabels[itemId] || itemId;
+  document.getElementById("modalTitle").textContent = label;
+  document.getElementById("modalHint").textContent = `库存：${state.inventory[itemId] || 0}`;
+  const actions = getItemActions(itemId);
+  document.getElementById("modalBody").innerHTML = `<div class="action-list">${actions.map(action => `
+    <button class="action-button" onclick="performAction('${action.id}')" ${action.disabled ? "disabled" : ""}>
+      <strong>${action.name}</strong>
+      <span>${action.description}${action.disabledReason ? `（${action.disabledReason}）` : ""}</span>
+    </button>
+  `).join("")}</div>`;
+  document.getElementById("modal").classList.remove("hidden");
+  document.getElementById("modal").setAttribute("aria-hidden", "false");
+}
+
+function getItemActions(itemId) {
+  const itemActions = {
+    ice: [
+      actionDef("use-ice-body", "冰块降体温", "冰块 -1，体温 -0.3 到 -0.8°C。"),
+      actionDef("use-ice-room", "冰块给房间续命", "冰块 -1，室温小幅下降。")
+    ],
+    towel: [
+      actionDef("use-towel-body", "湿毛巾擦身", "体温小幅下降，San +1。"),
+      actionDef("wet-towel-curtain", "湿毛巾挂窗帘", "室温小幅下降，但可能闷。"),
+      actionDef("fan-wet", "风扇 + 湿毛巾", "需要风扇，降体温和小幅降室温。", state.inventory.fan <= 0, "没有风扇")
+    ],
+    clip: [actionDef("repair-curtain", "用夹子修补窗帘", "消耗夹子，提升遮阳效果。")],
+    spray: [actionDef("use-spray", "喷雾瓶降温", "喷雾瓶 -1，体温 -0.2°C，San +2。")],
+    icePack: [actionDef("use-icepack-body", "冰袋降体温", "冰袋 -1，体温明显下降，San +3。")],
+    earplug: [actionDef("use-earplug", "戴上耳塞", "减少门窗持续噪音惩罚，San +4。", state.roomState.earplugOn, "已经戴上")],
+    shadeCloth: [actionDef("install-shade", "安装遮阳布", "遮阳布 -1，永久遮阳加成 +2。")],
+    mat: [actionDef("lay-mat", "铺凉席", "改善睡眠温度判定，San +2。", state.roomState.matLaid, "已经铺好")],
+    fan: [
+      actionDef("fan-on", "开风扇", "降低体感，San 变化取决于室温。"),
+      actionDef("fan-exhaust", "风扇对窗外排热", "需要先开窗，室外更低时才会降室温。", !state.roomState.windowOpen, "需要先开窗")
+    ]
+  };
+  return itemActions[itemId] || [actionDef("unknown-item", "暂时无法使用", "这个道具还没有直接使用方式。", true)];
+}
+
 function performAction(actionId) {
   if (!state || state.gameOver) return;
   if (isSleepPhase() && !actionId.startsWith("sleep-")) {
@@ -533,6 +574,7 @@ function performAction(actionId) {
     case "close-window": actionCloseWindow(); consumed = false; break;
     case "night-vent": actionNightVent(); consumed = false; break;
     case "close-curtain": actionCloseCurtain(); break;
+    case "open-curtain": actionOpenCurtain(); break;
     case "repair-curtain": actionRepairCurtain(); break;
     case "wet-towel-curtain": actionWetTowelCurtain(); break;
     case "study-hard": actionStudyHard(); break;
@@ -559,6 +601,11 @@ function performAction(actionId) {
     case "fan-exhaust": actionFanExhaust(); break;
     case "lake-trip": actionLakeTrip(); break;
     case "use-spray": actionUseSpray(); break;
+    case "use-icepack-body": actionUseIcePackBody(); break;
+    case "use-towel-body": actionUseTowelBody(); break;
+    case "install-shade": actionInstallShade(); break;
+    case "use-earplug": actionUseEarplug(); break;
+    case "lay-mat": actionLayMat(); break;
     case "sleep-normal": applySleep("normal"); consumed = false; break;
     case "sleep-floor": applySleep("floor"); consumed = false; break;
     case "sleep-towel": applySleep("towel"); consumed = false; break;
@@ -748,12 +795,14 @@ function updateSan() {
   else if (state.bodyTemp > 37.5) delta -= 1;
   if (state.sickMode) delta -= 2;
   if (state.roomState.windowOpen) {
-    delta -= state.floor === "low" ? 0.7 : 0.35;
-    if (hasDormEvent("construction")) delta -= 1.2;
-    if (hasDormEvent("mosquito") && isNightPhase()) delta -= 0.8;
+    const noiseFactor = state.roomState.earplugOn ? 0.45 : 1;
+    delta -= (state.floor === "low" ? 0.7 : 0.35) * noiseFactor;
+    if (hasDormEvent("construction")) delta -= 1.2 * noiseFactor;
+    if (hasDormEvent("mosquito") && isNightPhase()) delta -= 0.8 * noiseFactor;
   }
   if (state.roomState.doorOpen) {
-    delta -= 1.1 * (state.daily.modifiers.doorSanFactor || 1) + (state.daily.modifiers.doorSanAdd || 0) * 0.2;
+    const doorFactor = state.roomState.earplugOn ? 0.75 : 1;
+    delta -= (1.1 * (state.daily.modifiers.doorSanFactor || 1) + (state.daily.modifiers.doorSanAdd || 0) * 0.2) * doorFactor;
   }
   if (state.roomState.curtainClosed && currentPhase().hour >= 8 && currentPhase().hour <= 20) delta -= 0.45;
   if (state.daily.modifiers.collapseOver33 && state.roomTemp > 33) delta -= 3;
@@ -787,7 +836,7 @@ function applySleep(method) {
   }
 
   let effectiveTemp = state.roomTemp;
-  if (state.inventory.mat > 0) effectiveTemp -= 1;
+  if (state.inventory.mat > 0 || state.roomState.matLaid) effectiveTemp -= 1;
   if (state.inventory.fan > 0 && state.roomState.fanOn) effectiveTemp -= randomFloat(0.5, 1.0);
   if (method === "floor") {
     effectiveTemp -= state.daily.modifiers.floorBonus ? 1.5 : 0.6;
@@ -921,14 +970,15 @@ function getFurnitureActions(id) {
       actionDef("night-vent", "夜间大通风", "不消耗小时。21:00 日落后，且大风或外排风扇时会明显降温。", !(currentPhase().hour >= 21) || windowAlreadyAdjusted(), !(currentPhase().hour >= 21) ? "21:00 后可用" : "本小时已调整窗户")
     ],
     curtain: [
-      actionDef("close-curtain", "拉上窗帘", "降低阳光直射升温，可能影响学习心情。"),
+      actionDef("close-curtain", "拉上窗帘", "降低阳光直射升温，但当前和后续白天都会掉 San。", state.roomState.curtainClosed, "窗帘已经拉上"),
+      actionDef("open-curtain", "拉开窗帘", "停止窗帘带来的持续 San 惩罚，但后续直射升温会变强。", !state.roomState.curtainClosed, "窗帘已经打开"),
       actionDef("repair-curtain", "修补窗帘", "夹子成功率更高，大成功可获得永久遮阳加成。"),
       actionDef("wet-towel-curtain", "湿毛巾挂窗帘", "需要旧毛巾，立即小幅降温，但可能闷。", state.inventory.towel <= 0, "需要旧毛巾")
     ],
     computer: [
       actionDef("study-hard", "认真学习", "学习 +1，每天需要 6-8 小时，电脑升温明显。"),
       actionDef("study-low", "低功耗学习", "学习 +0.5，升温较少但更占时间。"),
-      actionDef("phone-scroll", "摸鱼刷手机", "不学习，稳定回复 San，但会消耗 1 小时。"),
+      actionDef("phone-scroll", "摸鱼刷手机", "不学习，San +8 到 +14，但会消耗 1 小时。"),
       actionDef("library-study", "去图书馆学习", "房间不升温。座位满了会不可用。", hasDormEvent("libraryFull"), "图书馆座位满了")
     ],
     fridge: [
@@ -1027,6 +1077,13 @@ function actionCloseCurtain() {
   addLog(`拉上窗帘：后续直射升温下降，当前 San -${loss}。`, "warn");
 }
 
+function actionOpenCurtain() {
+  state.roomState.curtainClosed = false;
+  const gain = state.roomTemp < 34 ? 3 : 1;
+  state.san += gain;
+  addLog(`拉开窗帘：停止窗帘持续 San 惩罚，San +${gain}；后续直射升温会增加。`, "good");
+}
+
 function actionRepairCurtain() {
   const hasClip = state.inventory.clip > 0;
   if (hasClip) state.inventory.clip -= 1;
@@ -1077,7 +1134,7 @@ function actionStudyLow() {
 
 function actionPhoneScroll() {
   const heat = randomFloat(0.1, 0.2);
-  const gain = state.studyProgress < studyNeed() ? randomInt(5, 7) : randomInt(7, 10);
+  const gain = state.studyProgress < studyNeed() ? randomInt(8, 11) : randomInt(10, 14);
   state.roomTemp += heat;
   state.san += gain;
   addLog(`摸鱼刷手机：学习 +0，室温 +${heat.toFixed(1)}°C，San +${gain}。`, "good");
@@ -1240,6 +1297,41 @@ function actionTidyWardrobe() {
   }
 }
 
+function actionUseIcePackBody() {
+  state.inventory.icePack -= 1;
+  const cool = randomFloat(0.45, 0.9);
+  state.bodyTemp -= cool;
+  state.san += 3;
+  addLog(`使用冰袋：体温 -${cool.toFixed(1)}°C，San +3。`, "good");
+}
+
+function actionUseTowelBody() {
+  const cool = randomFloat(0.1, 0.25) * (state.daily.modifiers.wetTowelFactor || 1);
+  state.bodyTemp -= cool;
+  state.san += 1;
+  if (state.daily.modifiers.humid && chance(0.3)) state.san -= 1;
+  addLog(`湿毛巾擦身：体温 -${cool.toFixed(1)}°C，San +1。`, "good");
+}
+
+function actionInstallShade() {
+  state.inventory.shadeCloth -= 1;
+  state.roomState.shadeBonus += 2;
+  state.san -= 1;
+  addLog("安装遮阳布：永久遮阳加成 +2，San -1。", "good");
+}
+
+function actionUseEarplug() {
+  state.roomState.earplugOn = true;
+  state.san += 4;
+  addLog("戴上耳塞：门窗持续噪音惩罚降低，San +4。", "good");
+}
+
+function actionLayMat() {
+  state.roomState.matLaid = true;
+  state.san += 2;
+  addLog("铺好凉席：今晚睡眠温度判定更宽松，San +2。", "good");
+}
+
 function actionUseSpray() {
   state.inventory.spray -= 1;
   state.bodyTemp -= 0.2;
@@ -1337,7 +1429,7 @@ function createEmptyInventory() {
 }
 
 function createRoomState() {
-  return { windowOpen: false, curtainClosed: false, curtainRepaired: false, doorOpen: false, fanOn: false, fanExhaust: false, fanCleaned: false, wetTowelUsed: false, fridgeCooling: false, shadeBonus: 0, nightVentilationPrepared: false };
+  return { windowOpen: false, curtainClosed: false, curtainRepaired: false, doorOpen: false, fanOn: false, fanExhaust: false, fanCleaned: false, earplugOn: false, matLaid: false, wetTowelUsed: false, fridgeCooling: false, shadeBonus: 0, nightVentilationPrepared: false };
 }
 
 function createDailyState() {
