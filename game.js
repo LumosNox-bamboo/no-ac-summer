@@ -979,7 +979,7 @@ function getFurnitureActions(id) {
       actionDef("study-hard", "认真学习", "学习 +1，每天需要 6-8 小时，电脑升温明显。"),
       actionDef("study-low", "低功耗学习", "学习 +0.5，升温较少但更占时间。"),
       actionDef("phone-scroll", "摸鱼刷手机", "不学习，San +8 到 +14，但会消耗 1 小时。"),
-      actionDef("library-study", "去图书馆学习", "房间不升温。座位满了会不可用。", hasDormEvent("libraryFull"), "图书馆座位满了")
+      actionDef("library-study", "去图书馆学习", "学习 +1，房间不升温；有空调传说时体温下降。", hasDormEvent("libraryFull"), "图书馆座位满了")
     ],
     fridge: [
       actionDef("make-ice", "冻冰块", "冰块 +1，但冰箱散热会升室温。"),
